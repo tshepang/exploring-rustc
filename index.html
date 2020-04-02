@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>exploring the Rust compiler</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+    <link rel="stylesheet" type="text/css" href="styles.css">
+  </head>
+  <body>
+    <textarea id="source">
+class: middle, center
+
+# exploring the Rust compiler
+
+Tshepang Lekhonkhobe
+
+@tshepang_dev
+
+**DevConf 2020**
+
+---
+class: middle, left
+
+## about
+
+- I studied electronics formally, but prefer software
+
+- I was a Python fan, and now Rust
+
+- I am part of a tiny team at https://panoptix.co.za,
+  building a distributed data processing framework,
+  in Rust
+
+---
+class: middle, left
+
+## major steps
+
+- parsing (src)
+
+- type checking (hir)
+
+- borrow checking (mir)
+
+- code generation (llvm ir)
+
+
+---
+class: middle, left
+
+## overview of compilation steps
+
+- process CLI args (flags and options)
+- lex source code (converts text into tokens)
+- use tokens to create AST
+- eliminate code, expand macros, and resolve names
+- use AST to create HIR (includes sugar removal)
+- infer types
+- check types
+- use HIR to create MIR
+- borrow checking (what makes Rust you-neek)
+- expand generics
+- use MIR to create LLVM IR
+- use LLVM IR to create machine code
+- link: use object code to create an executable
+
+---
+class: middle, left
+
+### process CLI args
+
+examples of various ways of using the compiler
+
++ which CPU to create code for (cross compiling)
++ whether to create optimized code
++ whether to show output of intermediate steps,
+  instead of an executable
++ debugging the compile
++ ...
+
+we are here only interested in the most common use...
+producing an executable
+
+**code**
+- `rustc_driver::main`
+- `rustc_driver::run_compiler`
+
+---
+class: middle, left
+
+### lex source code
+
+- needs to understand Rust syntax at a basic level
+
+- uses that to convert user source code into tokens
+
+**code**
+- `rustc_lexer::TokenKind`
+- `rustc_lexer::tokenize`
+
+---
+class: middle, left
+
+### use tokens to create AST
+
+- tokens are turned into Abstract Syntax Tree (AST)
+
+- individual parts of this tree are known as nodes
+
+  examples of tokens:
+
+  - StructField
+  - Block '{ ... }'
+  - FnDecl
+  - Expr
+
+**code**
+- `rustc_ast::node_id::NodeId`
+- `rustc_span::Span`
+
+---
+class: middle, left
+
+### operations on the AST
+
+- code elimination
+
+- macro expansion
+
+- name resolution
+
+
+---
+class: middle, left
+
+### code elimination
+
+(aka conditional compilation)
+
+```rust
+fn display_human(result: mrh::Output) {
+    #[cfg(windows)]
+    ansi_term::enable_ansi_support().unwrap();
+    print!("{}", result.path.display());
+    ...
+```
+
+- when built for Windows,
+  that cfg annotates code that allows color
+  output on a Windows terminal
+
+- when compilation target not Windows,
+  the code is ignored (as if it does not exist)
+
+---
+class: middle, left
+
+### macro expansion
+
+there's a few types of macros
+
+- derive, example being to apply Debug implementation to types
+
+- function-like, examples being `println!` and `assert_eq!`
+
+- attribute, example being structopt notation
+
+---
+class: middle, left
+
+### macro expansion
+
+example of functional-like macro:
+
+```rust
+assert_eq!(1, 1);
+```
+
+following is the code that gets generated (macro expansion) as a result...
+
+---
+class: middle, left
+
+```rust
+match (&1, &1) {
+    (left_val, right_val) => {
+        match {
+            let _t = !(*left_val == *right_val);
+            _t
+        } {
+            true => ::std::rt::begin_panic_fmt(&::core::fmt::Arguments::new_v1(
+                &[
+                    "assertion failed: `(left == right)`\n  left: `",
+                    "`,\n right: `",
+                    "`",
+                ],
+                &match (&&*left_val, &&*right_val) {
+                    (arg0, arg1) => [
+                        ::core::fmt::ArgumentV1::new(arg0, ::core::fmt::Debug::fmt),
+                        ::core::fmt::ArgumentV1::new(arg1, ::core::fmt::Debug::fmt),
+[snip]
+```
+
+---
+class: middle, left
+
+### macro expansion
+
+example of Attribute macro
+
+```rust
+#[structopt(
+    long = "ignore-untracked",
+    help = "Do not include untracked files in output",
+)]
+ignore_untracked: bool,
+```
+
+following is the code similar to what gets generated (macro expansion) as a result...
+
+---
+class: middle, left
+
+### macro expansion
+
+``` rust
+let app: structopt::clap::App = ...
+let arg: structopt::clap::Arg = app.arg(
+    structopt::clap::Arg::with_name("ignore_uncommitted_repos")
+        .takes_value(false)
+        .multiple(false)
+        .long("ignore-uncommited-repos")
+        .help("Do not include repos that have no commits"),
+);
+```
+
+---
+class: middle, left
+
+### name resolution
+
+- Rust allows you to use the same names to different things,
+  even in the same scope
+
+- what name resolution does is doing the disambiguation
+
+an example (of valid code):
+
+```rust
+type x = u32;
+let x: x = 1;
+let y: x = 2;
+```
+
+also:
+
+- variable shadowing
+- suggestions for typo fixes
+- suggestions for traits to import
+
+---
+class: middle, left
+
+### recap
+
+- **process CLI args (flags and options)**
+- **lex source code (converts text into tokens)**
+- **use tokens to create AST**
+- **eliminate code, expand macros, and resolve names**
+- use AST to create HIR (includes sugar removal)
+- infer types
+- check types
+- use HIR to create MIR
+- borrow checking (what makes Rust you-neek)
+- expand generics
+- use MIR to create LLVM IR
+- use LLVM IR to create machine code
+- link: use object code to create an executable
+
+
+---
+class: middle, left
+
+### HIR (high-level IR)
+
+the following happen here
+- type inference
+- type checking
+- trait resolution
+
+**code**
+- `rustc_middle::ty::TyKind`
+
+---
+class: middle, left
+
+### HIR howto
+
+representation of what HIR operates on
+
+    rustc main.rs -Z unpretty=hir
+
+what HIR actually looks like
+
+    rustc main.rs Z unpretty=hir-tree
+
+---
+class: middle, left
+
+### MIR (mid-level IR)
+
+- an even more simple representation of HIR
+
+- an example of that is that loops are replaced with gotos
+
+- it's called medium because it sits between HIR and LLVM IR
+
+---
+class: middle, left
+
+### what happens on MIR
+
+The main part that happens is borrow checking, and following is some
+of what that entails:
+
+- vars can't be used uninitialised
+- vars can't be accessed once moved
+- vars can't be moved while still borrowed
+- vars can't be accessed while still mutably borrowed
+
+what else:
+- some optimization on the MIR
+- generics are expanded
+- output is LLVM IR
+
+---
+class: middle, left
+
+### MIR howto
+
+what MIR actually looks like
+
+    rustc main.rs Z unpretty=mir
+
+not pretty output,
+but the simpler representation makes things more easy to
+perform the operations mentioned before
+
+---
+class: middle, left
+
+### LLVM IR howto
+
+what LLVM MIR actually looks like
+
+    rustc main.rs --emit llvm-ir
+
+```
+define internal void @_ZN4main7display17h390fc06f97a64f1dE([0 x i8]* noalias nonnull readonly align 1 %text.0, i64 %text.1) unnamed_addr #1 personality i32 (i32, i32, i64, %"unwind::libunwind::_Unwind_Exception"*, %"unwind::libunwind::_Unwind_Context"*)* @rust_eh_personality {
+start:
+  %_2.i = alloca %"core::str::{{impl}}::as_bytes::Slices", align 8
+  %0 = alloca { i8*, i32 }, align 8
+  %_5 = alloca %"core::result::Result<(), std::io::error::Error>", align 8
+  %stdout = alloca i64*, align 8
+; call std::io::stdio::stdout
+  %1 = call nonnull i64* @_ZN3std2io5stdio6stdout17hfdfa427b7a48cf20E()
+  store i64* %1, i64** %stdout, align 8
+  br label %bb2
+...
+```
+
+---
+class: middle, left
+
+### assembly howto
+
+what asm actually looks like
+
+    rustc main.rs --emit asm --target riscv64gc-unknown-linux-gnu
+
+just a snippet...
+
+```
+main:
+    .cfi_startproc
+    addi    sp, sp, -32
+    .cfi_def_cfa_offset 32
+    sd  ra, 24(sp)
+    .cfi_offset ra, -8
+    sext.w  a2, a0
+.LBB290_1:
+    auipc   a3, %pcrel_hi(_ZN4main4main17h9e0ea2b04575dfdbE)
+    addi    a3, a3, %pcrel_lo(.LBB290_1)
+    sd  a0, 16(sp)
+    add a0, zero, a3
+```
+
+---
+class: middle, left
+
+### final steps
+
+- LLVM takes its IR and generates machine code output (in the form
+  of .o files)
+
+- linking finally happens (using lld or binutils),
+  where we finally have something we can execute
+
+---
+### thanks
+
+- rustc dev guide (https://rustc-dev-guide.rust-lang.org)
+
+- DevConf for "forcing" me to (re-)learn this stuff
+
+
+    </textarea>
+    <script src="remark-latest.min.js" type="text/javascript">
+    </script>
+    <script type="text/javascript">
+      var slideshow = remark.create();
+    </script>
+  </body>
+</html>
